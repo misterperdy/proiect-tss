@@ -58,7 +58,10 @@ class QuoridorEnv:
         return self._walls_sig
 
     def encode(self):
-        from .state_encoder import encode_state_canonical
+        try:
+            from .state_encoder import encode_state_canonical
+        except ImportError:
+            from state_encoder import encode_state_canonical
         return encode_state_canonical(self)
 
     def observe(self):
@@ -440,7 +443,10 @@ class QuoridorEnv:
         return False
 
     def _has_path_with(self, start, target_row, h_walls, v_walls):
-        from .shortest import _pawn_legal_targets_from_pos
+        try:
+            from .shortest import _pawn_legal_targets_from_pos
+        except ImportError:
+            from shortest import _pawn_legal_targets_from_pos
         player_idx = 0 if target_row == 0 else 1
         q = deque([start])
         seen = {start}

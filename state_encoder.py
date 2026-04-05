@@ -1,5 +1,8 @@
 import numpy as np
-from .Quoridor_Class import BOARD_SIZE, NUM_ACTIONS, ACTION_H_BASE, ACTION_V_BASE
+try:
+    from .Quoridor_Class import BOARD_SIZE, NUM_ACTIONS, ACTION_H_BASE, ACTION_V_BASE
+except ImportError:
+    from Quoridor_Class import BOARD_SIZE, NUM_ACTIONS, ACTION_H_BASE, ACTION_V_BASE
 
 
 def _rot180_rc(r, c):
