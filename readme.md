@@ -2,11 +2,15 @@ Proiect pentru Optional Testarea Sistemelor Software - testare unitara in Python
 Unibuc FMI, Anul 3
 
 # Membrii echipei
-Matei Alexandru-Antonie
-Seniuc Andrei
-Miroiu Alexandru
-Judele Roberto
-Szocs Luca
+Matei Alexandru-Antonie (342)
+
+Seniuc Andrei (342)
+
+Miroiu Alexandru (344)
+
+Judele Roberto (344)
+
+Szocs Luca (341)
 
 # Documentatie
 
