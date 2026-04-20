@@ -99,6 +99,3 @@ def main():
         print(f"Scor/Procent = {ms:.2f} (sau {ms * 100:.1f}%) ")
 
 
-
-if __name__ == "__main__":
-    main()
