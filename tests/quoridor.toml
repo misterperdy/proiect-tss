@@ -1,0 +1,7 @@
+[cosmic-ray]
+module-path = "../Quoridor_Class.py"
+test-command = "python -m pytest tests/test_functional_quoridor.py" # Comanda de test
+timeout = 10.0                     #Secunde pana consideram ca este blocat infinit mutantul
+
+[cosmic-ray.distributor]
+name = "local" #Rulare pe local

@@ -1,0 +1,15 @@
+
+python -m venv venv
+.\venv\Scripts\activate
+
+pip install pytest cosmic-ray
+cosmic-ray --version
+pytest --version
+
+rm storage.sqlite
+cosmic-ray init config.toml storage.sqlite
+cosmic-ray exec config.toml storage.sqlite
+//cosmic-ray report storage.sqlite
+//cr-report storage.sqlite
+cr-html storage.sqlite > report.html
+cr-report storage.sqlite --show-diff
