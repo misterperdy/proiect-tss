@@ -7,6 +7,54 @@
 *   **Pregătirea automată a testelor:** Pentru un joc cum este Quoridor, avem nevoie de o tablă curată de joc la fiecare test. `pytest` simplifică enorm acest flux printr-un sistem prin care pregătește "scena" automat în fundal, fără să fim nevoiți să duplicăm codul de resetare.
 *   **Standardul industriei:** Astăzi, Pytest este standardul *de facto* în companiile de IT moderne. Mai mult, oferă o experiență mult mai prietenoasă când un test eșuează: îți arată exact unde și de ce valorile nu s-au potrivit, oferind feedback imediat, spre deosebire de rapoartele adesea mai greu de descifrat din vechiul `unittest`.
 
+**Un mic exemplu practic (unittest vs pytest)**
+
+*Varianta `unittest` (mai mult "boilerplate code"):*
+```python
+import unittest
+
+def factorial(n):
+    if n < 0:
+        raise ValueError("Factorial is not defined for negative numbers")
+    elif n == 0:
+        return 1
+    else:
+        return n * factorial(n-1)
+
+class TestFactorial(unittest.TestCase):
+    def test_positive(self):
+        self.assertEqual(factorial(5), 120)
+
+    def test_zero(self):
+        self.assertEqual(factorial(0), 1)
+
+    def test_negative(self):
+        with self.assertRaises(ValueError):
+            factorial(-1)
+
+if __name__ == '__main__':
+    unittest.main()
+```
+
+*Varianta `pytest` (simplă și directă):*
+```python
+import pytest
+
+
+def factorial(n):
+    # Funcția originală rămâne la fel
+
+def test_positive():
+    assert factorial(5) == 120
+
+def test_zero():
+    assert factorial(0) == 1
+
+def test_negative():
+    with pytest.raises(ValueError):
+        factorial(-1)
+```
+
 **De ce am ales `Cosmic Ray` în loc de `mutmut` sau `MutPy` pentru testarea mutațională?**
 *   **Acuratețea Mutațiilor (AST vs Regex):** `mutmut` folosește o abordare bazată pe manipularea de text (regex), ceea ce poate genera ocazional mutanți cu erori de sintaxă. În schimb, `Cosmic Ray` citește codul ca un "Abstract Syntax Tree" (înțelege efectiv logica de Python), garantând că defectele introduse sunt valabile din punct de vedere arhitectural.
 *   **Managementul Sesiunilor (SQLite):** `Cosmic Ray` separă clar faza de generare a mutanților de execuția lor, stocând totul într-o bază de date `quoridor.sqlite`. Asta înseamnă că dacă procesul durează prea mult sau pică, el poate fi reluat de unde a rămas, oferind o trasabilitate excelentă (spre deosebire de `mutmut` care e mai expus la coruperea fișierelor cache).
