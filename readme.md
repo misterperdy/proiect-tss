@@ -15,24 +15,7 @@ Szocs Luca (341)
 
 # Documentatie
 
-### Strategii
-
-### Diagrame
-
-### Configuratie
-TODO (Windows 10/11, fara VM, Visual studio code etc + versiune tooluri/python)
-
-### Bucati de cod
-
-### Screenshot-uri cu rulare teste si rezultate
-
-### Tabel comparatii rezultate
-
-### Interpretari
-
-### Bibliografie
-
-### 
+Schite pentru documentatie in folderul [docs](https://github.com/misterperdy/proiect-tss/tree/main/docs).
 
 # Prezentare
 
