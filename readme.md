@@ -23,6 +23,4 @@ Szocs Luca (341)
 
 # Demo video
 
-<video width="100%" controls>
-  <source src="tests/Demo_TSS.mp4" type="video/mp4">
-</video>
+[Demo](https://github.com/misterperdy/proiect-tss/raw/refs/heads/main/docs/Demo_TSS.mp4)
