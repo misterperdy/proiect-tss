@@ -1,4 +1,4 @@
-Proiect pentru Optional Testarea Sistemelor Software - testare unitara in Python
+Proiect pentru Optional Testarea Sistemelor Software - testare unitara in Python a clasei QuoridorEnv
 
 Unibuc FMI, Anul 3
 
@@ -13,18 +13,14 @@ Judele Roberto (344)
 
 Szocs Luca (341)
 
-# Documentatie
+# Documentație + Raport AI
 
-Schite pentru documentatie in folderul [docs](https://github.com/misterperdy/proiect-tss/tree/main/docs).
+[Documentație completă (inclusiv raport AI)](https://github.com/misterperdy/proiect-tss/tree/main/docs/Raport_Final_Testare_Quoridor.md).
 
 # Prezentare
 
-TODO
+[Link Prezentare](https://docs.google.com/presentation/d/1h3C5x3n75Qp1h8eW4f6y2r6J3lP7XlJ1Q5z9T3q8r6W/edit?usp=sharing)
 
-# Video demo proiect
-
-TODO
-
-# Raport folosire AI
+# Demo video
 
 TODO
