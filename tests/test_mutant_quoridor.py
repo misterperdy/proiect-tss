@@ -2,8 +2,9 @@ import os
 import subprocess
 import shutil
 
-TARGET_FILE = "../Quoridor_Class.py"
-BACKUP_FILE = "../Quoridor_Class.original.py"
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TARGET_FILE = os.path.join(BASE_DIR, "Quoridor_Class.py")
+BACKUP_FILE = os.path.join(BASE_DIR, "Quoridor_Class.original.py")
 
 MUTANTS = [
     {
@@ -98,4 +99,6 @@ def main():
         print(f"Mutanti in viata : {live_non_equivalent} ")
         print(f"Scor/Procent = {ms:.2f} (sau {ms * 100:.1f}%) ")
 
+if __name__ == "__main__":
+    main()
 
