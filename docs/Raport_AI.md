@@ -3,267 +3,319 @@
 
 | | |
 |---|---|
-| **Data** | 2026-05-03 |
-| **Judecător** | Claude Sonnet 4.6 |
-| **Subiect** | `QuoridorEnv` — un mediu de joc Quoridor destinat Reinforcement Learning, implementat în `Quoridor_Class.py` (module ajutătoare: `shortest.py`, `state_encoder.py`) |
+| **Data** | 2026-05-17 |
+| **Judecator** | GitHub Copilot (Claude Sonnet 4.6) |
+| **Subiect** | `QuoridorEnv` — mediu Quoridor pentru Reinforcement Learning (`Quoridor_Class.py`, `shortest.py`, `state_encoder.py`) |
+| **Criteriu de evaluare** | **Calitatea si rigoarea testelor** (nu acoperirea clasei) |
 
 ---
 
 **Prompt-ul dat ambelor LLM-uri:**
 
-> „Ești un inginer software. Ți s-a dat această clasă Python (împreună cu 2 scripturi ajutătoare). Știi dinainte că această clasă definește un mediu pentru jocul Quoridor, conceput special pentru Reinforcement Learning. Sarcina ta este să analizezi clasa și să scrii câteva teste eficiente și optime pentru a te asigura că mediul este pregătit pentru următoarea sa fază. Nu ești obligat să acoperiți întreaga clasă, dar testele pe care le scrii ar trebui să identifice componentele de bază ale clasei și potențialele sale vulnerabilități."
->
+> „Esti un inginer software. Ti s-a dat aceasta clasa Python (impreuna cu 2 scripturi ajutatoare). Stii dinainte ca aceasta clasa in lucru defineste un mediu pentru jocul Quoridor, conceput special pentru Reinforcement Learning. Sarcina ta este sa analizezi clasa si sa scrii cateva teste eficiente si optime pentru a te asigura ca mediul este conceput corect pana acum. Nu esti obligat sa acoperi intreaga clasa, dar testele pe care le scrii ar trebui sa identifice componentele de baza ale clasei si potentialele sale vulnerabilitati."
 
 ---
 
-## 1. Prezentare generală a fiecărei suite
+## 1. Dimensiunile de calitate evaluate
 
-### GPT-5.4 (`GPT-5.4_tests.py`)
-| Proprietate | Valoare |
+Fiecare suita este analizata pe urmatoarele dimensiuni:
+
+| Dimensiune | Ce masoara |
 |---|---|
-| Număr de teste | ~18 funcții (1 parametrizat × 2 = 20 rulări) |
-| Framework | pytest, funcții simple + markeri `@pytest.mark.xfail` |
-| Structură | Listă plată de funcții, fără clase |
-
-### Opus-4.7 (`Opus-4.7_tests.py`)
-| Proprietate | Valoare |
-|---|---|
-| Număr de teste | ~40 metode de test în 10 clase + 1 clasă smoke-test |
-| Framework | pytest, organizare bazată pe clase |
-| Structură | 10 clase tematice: `TestActionSpace`, `TestReset`, `TestLegalMask`, `TestPawnMovement`, `TestPawnJumpRules`, `TestWallPlacement`, `TestTermination`, `TestApplyUndo`, `TestClone`, `TestEncoder`, `TestPolicyPermutation`, `TestRandomPlaySmoke` |
-
-### Teste umane (directorul `tests/`)
-| Fișier | Descriere |
-|---|---|
-| `test_functional_quoridor.py` | 13 metode de test în 2 clase — metodologie Black-Box EP + BVA |
-| `test_structural_quoridor.py` | ~24 metode de test în 5 clase — testare White-Box / Structurală |
-| `test_mutant_quoridor.py` | Runner extern pentru scor de mutanți (4 mutanți M1–M4, script non-pytest) |
-| `test_mutation_killers.py` | 2 teste RSP-model mutation-killer (MTK-001, MTK-002) |
-| **Total** | ~40+ funcții/metode de test în 4 fișiere |
+| **Izolare** | Fiecare test valideaza un singur concept / comportament |
+| **Determinism** | Testele produc acelasi rezultat la fiecare rulare |
+| **Calitatea asertiunilor** | Asertiunile sunt precise, verifica exact ce trebuie si esueaza cu mesaje clare |
+| **Calitatea setup-ului** | Fixture-urile si pregatirea starii sunt curate, independente si nu ascund logica testului |
+| **Rezistenta la false-positive** | Un test nu poate trece cand codul testat este gresit |
+| **Rigoarea metodologica** | Exista o strategie sistematica (EP, BVA, RSP) sau testele sunt ad-hoc |
+| **Claritate si documentatie** | Denumirile si comentariile comunica intentia fara ambiguitate |
+| **Robustete** | Testele nu sunt legate de numere de linii, structuri interne sau detalii de implementare fara legatura |
 
 ---
 
-## 2. Matricea de acoperire a funcționalităților
+## 2. Analiza GPT-5.4
 
-| Aspect | GPT-5.4 | Opus-4.7 | Uman |
-|---|:---:|:---:|:---:|
-| Consistența constantelor spațiului de acțiuni | NU | DA | NU |
-| Stare inițială / `reset()` | DA | DA | Implicit |
-| `reset(walls_left=...)` inițializare personalizată | NU | DA | NU |
-| Forma și tipul măștii `legal_actions()` | DA | DA | Parțial |
-| Numărul acțiunilor legale pe tablă goală | DA | DA | NU |
-| `legal_actions()` returnează zero când `done` | NU | DA | NU |
-| Mutări pion: normale | DA | DA | Parțial |
-| Mutări pion: colț (doar 2 mutări) | NU | DA | NU |
-| Mutări pion: nu poate călca pe adversar | DA | DA | NU |
-| Salt pion: direct peste adversar | DA | DA | NU |
-| Salt pion: diagonal (fallback cu zid) | DA | DA | NU |
-| Salt pion: diagonal la marginea tablei | NU | DA | NU |
-| Salt pion: nu poate reveni la sine | NU | DA | NU |
-| Suprapunere zid `_overlaps_h` (3 direcții) | Parțial | DA | DA (ambele) |
-| Suprapunere zid `_overlaps_v` (3 direcții) | NU | DA | DA (structural) |
-| Intersecție ziduri `_crosses_h/v` | DA | DA | DA (structural) |
-| Legalitate zid `_legal_h_wall` | DA | DA | DA (ambele, BVA detaliat) |
-| Legalitate zid `_legal_v_wall` | NU | DA | DA (structural) |
-| Buget de ziduri respectat | DA | DA | DA (ambele) |
-| Zid în afara limitelor respins | NU | DA | DA (BVA funcțional) |
-| Zid care blochează calea respins | DA | DA | DA (ambele) |
-| Recompensă `step()`: 0 la mutare normală | DA | Implicit | NU |
-| Recompensă `step()`: +1 la victorie (J0) | DA | DA | NU |
-| Recompensă `step()`: +1 la victorie (J1) | NU | DA | NU |
-| Recompensă `step()`: -1 la mutare ilegală | DA | DA | NU |
-| Mutare ilegală → joc terminat | DA | DA | NU |
-| `RuntimeError` la `step()` după terminare | DA | DA | NU |
-| Corectitudinea schimbului de tur | DA | Implicit | DA (MTK) |
-| Regula remiză la 3 repetiții | NU | DA | NU |
-| `apply()` / `undo()` tur-retur pion | DA | DA | DA (structural) |
-| `apply()` / `undo()` zid H (câmpuri owner) | DA | DA | DA (structural) |
-| `apply()` / `undo()` zid V | DA | DA | DA (structural) |
-| `apply()` / `undo()` restaurare mutare câștigătoare | NU | DA | NU |
-| `apply()` / `undo()` lanț aleator (stres) | NU | DA (10×) | NU |
-| Independența `clone()` | DA | DA | NU |
-| `clone()` produce aceeași mască legală | NU | DA | NU |
-| Forma și tipul `encode()` | DA | DA | NU |
-| Planele pion/adversar în `encode_state()` | NU | DA | NU |
-| Normalizarea `walls_left` în `encode_state()` | NU | DA | NU |
-| Canonic = identitate pentru jucătorul 0 | DA | DA | NU |
-| Canonic = rotație 180° pentru jucătorul 1 | DA | DA | NU |
-| Canal goal-row canonic (ch. 6) | NU | DA | NU |
-| Tur-retur `policy_to_canonical` J0 | DA | DA | NU |
-| Tur-retur `policy_to_canonical` J1 | DA | DA | NU |
-| Permutare politică: verificare matematică 180° | NU | DA | NU |
-| `mask_to_canonical` conservă suma | DA | DA | NU |
-| Test smoke aleatoriu (multe jocuri) | NU | DA (25 jocuri) | NU |
-| Documentație limite EP/BVA | NU | NU | DA (extinsă) |
-| Teste direcționate pe mutanți (model RSP) | NU | NU | DA (MTK-001/002) |
-| Runner extern scor mutanți | NU | NU | DA (M1–M4) |
-| Markeri `xfail` pentru bug-uri cunoscute | DA (3) | NU | NU |
-| `_walls_sig_dirty` / cache | DA (xfail) | NU | DA (structural) |
-| Acoperire directă `_blocked_with` | NU | NU | DA (9 cazuri) |
-| Acoperire directă `_blocked_with_temp` | NU | NU | DA (3 cazuri) |
-| Reutilizare / invalidare cache cale | NU | NU | DA (structural) |
+### 2.1 Proiectarea testelor — densitate ridicata, izolare medie
+
+GPT-5.4 scrie functii de test compacte care acopera **mai multe afirmatii inrudite in acelasi test**. De exemplu, `test_reset_contract_and_initial_legal_actions` verifica simultan: pozitiile pionilor, starea `done`/`winner`, forma tensorului encoded, continutul mastii legale si numarul total de actiuni legale. Aceasta densitate are avantajul eficientei, dar incalca principiul *single responsibility*: un esec nu localizeaza imediat cauza.
+
+```python
+# GPT-5.4 — un singur test, afirmatii multiple fara legatura directa
+assert env.pawns == [(8, 4), (0, 4)]
+assert env.player == 0
+assert encoded.shape == (7, 9, 9)
+assert int(mask.sum()) == 131
+```
+
+In contrast, `test_apply_and_undo_round_trip_for_pawn_and_wall_actions` aplica **trei actiuni diferite** (pion, zid H, zid V) in acelasi test — util ca test de regresie rapid, dar nu izoleaza comportamentul fiecarui tip de actiune.
+
+### 2.2 Calitatea asertiunilor — precisa si completa
+
+Helper-ul `snapshot` + `assert_same_state` este cel mai **complet mecanism de comparare a starii** din toate cele trei suite. Verifica:
+- `pawns`, `walls_h`, `walls_v`, `walls_h_owner`, `walls_v_owner`, `walls_left`, `player`, `done`, `winner`
+
+Nicio alta suita nu include `walls_h_owner` / `walls_v_owner` in comparatia de stare a testelor apply/undo. Aceasta face testele GPT-5.4 **mai rezistente la mutatii** pe campurile owner.
+
+Asertiunile pe encoder sunt exacte si neredundante:
+```python
+assert x[0, 6, 5] == 1.0  # pionul jucatorului curent dupa rotatie 180 grade
+assert x[1, 0, 4] == 1.0  # pionul adversarului
+assert np.allclose(x[4], 5 / MAX_WALLS)  # normalizarea walls_left
+```
+Fiecare verifica o proprietate distincta, nu o consecinta a alteia.
+
+### 2.3 Setup si independenta — curate, cu manipulare directa acceptabila
+
+GPT-5.4 nu foloseste fixture-uri pytest. Fiecare test instantiaza `QuoridorEnv()` local. Manipularea directa a starii (`env.pawns = [(4, 4), (3, 4)]`) este o practica acceptabila in unit testing pentru setup rapid, dar creeaza dependenta de implementarea interna a clasei (daca `pawns` devine proprietate privata, testele se rup).
+
+### 2.4 Rezistenta la false-positive
+
+**Punct slab critic:** `test_temporary_wall_path_check_detects_no_path_position` injecteaza manual ziduri in `env.walls_h` si `env.walls_v` si seteaza `env._walls_sig_dirty = True`. Testul verifica ca `_check_paths_with_temp_wall(h=(3, 3))` returneaza `False`. Totusi, scenariul de blocare ales este **dependent de o combinatie specifica de ziduri pre-existente** — daca configuratia e gresit aleasa, testul poate trece chiar si cu un bug in pathfinding.
+
+**Punct forte:** Testul `xfail` cu `pytest.raises((ValueError, AssertionError))` documenteaza comportamentul absent fara a crea un fals pozitiv — testul **nu trece** si nu **esueaza** in sensul traditional; el confirma prezenta unui bug cunoscut.
+
+### 2.5 Rigoarea metodologica — ad-hoc inteligent
+
+Nu exista o metodologie declarata. Selectia scenariilor pare bazata pe **judecata inginereasca** a modelului: alege componentele critice pentru RL (apply/undo, sarituri pion, encodare canonica) si le testeaza cu scenarii concrete. Nu exista partitionare sistematica, dar alegerile sunt bine motivate.
+
+Exceptie notabila: `test_shortest_path_len_works_when_scripts_are_run_directly` nu este un test de logica — este un **test de integrare** care detecteaza un bug structural (import relativ care esueaza). Este singurul test din toate suitele care acopera acest tip de risc.
+
+### 2.6 Claritate si documentatie — minima dar suficienta
+
+Denumirile functiilor sunt descriptive si comunica clar scenariul. Nu exista comentarii inline, dar codul este suficient de lizibil. Absenta claselor face structura mai greu de navigat la scale mai mari.
 
 ---
 
-## 3. Puncte forte și puncte slabe
+## 3. Analiza Opus-4.7
 
-### 3.1 GPT-5.4
+### 3.1 Proiectarea testelor — izolare excelenta, responsabilitate unica
 
-#### Puncte forte
-- **a)** Documentare onestă prin `xfail` a 3 bug-uri reale:
-  - `clone()` nu copiază `walls_h_owner` / `walls_v_owner`
-  - `step()` pe ramura cu zid nu setează `_walls_sig_dirty`
-  - ID-urile de acțiuni în afara domeniului aruncă `IndexError` în loc să fie tratate ca ilegale
+Opus-4.7 respecta strict principiul *single responsibility*. Fiecare metoda testeaza **exact un comportament**:
 
-  Nicio altă suită nu semnalează aceste bug-uri.
+```python
+def test_h_wall_overlap_is_rejected(self):
+    # testeaza DOAR ca zidurile H adiacente sunt respinse din masca legala
+    env.apply(_h_action(4, 4))
+    env.player = 0
+    mask = env.legal_actions()
+    self.assertEqual(mask[_h_action(4, 3)], 0.0)
+    self.assertEqual(mask[_h_action(4, 5)], 0.0)
+    self.assertEqual(mask[_h_action(4, 4)], 0.0)
+    self.assertEqual(mask[_h_action(4, 6)], 1.0)  # sanity: non-adjacent e legal
+    self.assertEqual(mask[_h_action(3, 4)], 1.0)  # sanity: alt rand e legal
+```
 
-- **b)** Testează `step()` ca metodă RL integrată — valori de recompensă, schimbul de tur, detectarea victoriei, garda `RuntimeError` — toate absente din suita umană.
-- **c)** Salt pion drept + diagonal testat, inclusiv cazul de fallback diagonal declanșat de un zid în spatele adversarului.
-- **d)** Simetria canonică și tur-retrul politicii testate, acoperind o proprietate de corectitudine specifică AlphaZero, absentă din suita umană.
-- **e)** Independența copiei profunde `clone()` verificată.
+Ultimele doua afirmatii (sanity checks pe cazuri valide) previn **false-positive-uri**: un bug care marcheaza TOTI zidurile ilegali ar fi prins de `mask[_h_action(4, 6)] == 1.0`.
 
-#### Puncte slabe
-- **a)** Cea mai mică suită (~20 rulări). Multe căi importante nu sunt atinse.
-- **b)** Niciun test pentru ziduri verticale (`_legal_v_wall` nu este apelat niciodată direct).
-- **c)** Doar recompensa de victorie a J0 este testată; victoria J1 este omisă.
-- **d)** Niciun test de mutare din colț; niciun test „nu poate călca pe adversar".
-- **e)** Niciun test de salt pion la marginea tablei.
-- **f)** Regula remiză la 3 repetiții complet absentă.
-- **g)** `reset(walls_left=...)` nu este testat.
-- **h)** Revenirea mutării câștigătoare prin `apply/undo` nu este testată.
-- **i)** Niciun test smoke/fuzz.
-- **j)** Nicio metodologie documentată; intenția trebuie dedusă din cod.
+### 3.2 Calitatea asertiunilor — precisa si defensiva
 
----
+`_snapshot` + `_states_equal` sunt echivalente ca completitudine cu helper-ele din GPT-5.4. In plus, Opus-4.7 adauga **sanity assertions** sistematice in testele de reguli:
 
-### 3.2 Opus-4.7
+In `test_wall_that_traps_opponent_is_rejected`, dupa verificarea principala, adauga:
+```python
+self.assertFalse(env._overlaps_h(1, 0))
+self.assertFalse(env._crosses_h(1, 0))
+self.assertGreater(env.walls_left[0], 0)
+```
+Aceste afirmatii exclud explicit ca respingerea sa vina din overlap/crossing/buget — dovedind ca respingerea vine **exclusiv** din regula de blocare a caii. Aceasta este testare defensiva de inalta calitate.
 
-#### Puncte forte
-- **a)** Cea mai largă acoperire dintre cele trei suite. Singura suită care testează **toate** acestea:
-  - Regula remiză la 3 repetiții (`test_threefold_repetition_draws`)
-  - `reset(walls_left=...)` inițializare personalizată
-  - `legal_actions()` returnează zero când `env.done` este `True`
-  - Pion în colț cu exact 2 mutări
-  - Regula „nu poate călca pe adversar"
-  - Salt pion la marginea tablei (diagonal forțat deoarece rândul -1 este în afara tablei)
-  - Siguranța „saltul nu poate reveni la sine"
-  - Detectarea victoriei J1 (recompensă +1)
-  - `apply/undo` pe o mutare câștigătoare (restaurează `done`, `winner`, `player`)
-  - Lanț aleator de 10 pași `apply/undo` (test de stres)
-  - `clone()` produce aceeași mască legală ca originalul
-  - Valorile planelor pion și adversar din `encode_state()`
-  - Normalizarea `walls_left` în planele 4 și 5 ale encoder-ului
-  - Conținutul canalului goal-row canonic (canalul 6)
-  - Verificare matematică rotație 180° pentru `policy_to_canonical`
-  - Test smoke aleatoriu (25 de jocuri cu bias spre mutare înainte)
-  - Consistența constantelor spațiului de acțiuni (`TestActionSpace`)
+In `test_straight_jump_over_opponent`:
+```python
+self.assertEqual(mask[_pawn_action(2, 4)], 1.0)   # saltul drept e legal
+self.assertEqual(mask[_pawn_action(3, 3)], 0.0)   # diagonala NU e legala cand dreptul e liber
+self.assertEqual(mask[_pawn_action(3, 5)], 0.0)   # idem cealalta diagonala
+```
+Verifica nu doar ce este legal, ci si ce **nu** trebuie sa fie legal — prevenind bug-ul simetric (diagonale activate eronat).
 
-- **b)** Testele de plasare a zidurilor acoperă ambele orientări cu mai multe cazuri de adiacență (același slot, adiacent stânga/dreapta pentru ziduri H; același slot, adiacent sus/jos pentru ziduri V) plus un scenariu matematic de capcană în colț.
-- **c)** Testele `apply/undo` sunt cele mai complete: pion, zid H, zid V, mutare câștigătoare și un lanț aleator de 10 mutări — fiecare cu comparație completă de stare inclusiv array-urile owner și `walls_left`.
-- **d)** Structură clară bazată pe clase, lizibilă, cu comentarii doc care explică intenția.
-- **e)** Helpere auto-conținute (`_snapshot`, `_equal`, `_legal_pawn_targets`) îmbunătățesc lizibilitatea și reutilizarea.
+### 3.3 Setup si independenta — consistent, cu un compromis acceptabil
 
-#### Puncte slabe
-- **a)** Zero testare de mutanți. Niciun marker `xfail`, niciun test RSP-model, niciun runner extern de scor mutanți.
-- **b)** Nicio documentație EP/BVA. Valorile de frontieră sunt exercitate pe alocuri, dar niciodată denumite sau justificate sistematic.
-- **c)** `_blocked_with` și `_blocked_with_temp` nu sunt niciodată apelate direct. Suita structurală umană le acoperă cu 12 cazuri parametrizate.
-- **d)** Corectitudinea cache-ului de cale (reutilizare pe aceeași cheie, cheie nouă după schimbarea zidului) nu este verificată.
-- **e)** Nicio documentație de bug-uri cunoscute. Cele trei bug-uri găsite de markerii `xfail` ai GPT-5.4 nu sunt semnalate deloc.
-- **f)** Afirmația din smoke test `sum(terminations.values()) == n_games` este trivial adevărată deoarece „stalled" incrementează contorul; nu dovedește că fiecare joc se termină printr-o regulă reală de joc.
+Toate testele folosesc `setUp` / instantiere locala. Un compromis acceptabil: dupa `env.apply(_h_action(4, 4))` (care avanseaza turul la jucatorul 1), unele teste seteaza manual `env.player = 0` pentru a testa din perspectiva jucatorului 0. Aceasta este **manipulare directa de stare**, dar scopul este clar si bine documentat.
 
----
+### 3.4 Determinism — garantat
 
-### 3.3 Teste umane
+`test_long_random_sequence_full_unwind` foloseste `np.random.default_rng(0)` (seed fix). `test_random_legal_actions_apply_and_undo_cleanly` foloseste `np.random.default_rng(1)`. Ambele sunt **complet deterministe** si nu pot produce rezultate diferite la reluare.
 
-#### Puncte forte
-- **a)** Singura suită cu metodologie riguroasă și trasabilă. Fiecare clasă de teste denumește partiția de echivalență sau valoarea de frontieră vizată, făcând suita auditabilă și ușor de întreținut.
-- **b)** Singura suită cu testare de mutanți:
-  - `test_mutant_quoridor.py`: runner automat pentru 4 mutanți, raportează scorul.
-  - `test_mutation_killers.py`: RSP-model killers pentru 2 mutanți supraviețuitori (MTK-001, MTK-002), fiecare cu o schiță de demonstrație.
-- **c)** `_blocked_with` și `_blocked_with_temp` sunt testate direct cu 12 cazuri parametrizate — cea mai temeinică acoperire a subsistemului de blocare a mișcării.
-- **d)** `apply/undo` verifică array-urile owner (`walls_h_owner`, `walls_v_owner`) și `walls_left` pe lângă prezența zidurilor.
-- **e)** Reutilizarea și invalidarea cache-ului de cale verificate ca gardă de regresie.
-- **f)** `_overlaps_h`, `_overlaps_v` acoperite pentru toate cele trei direcții de adiacență.
-- **g)** BVA pentru `_legal_h_wall`: 4 combinații valide de frontieră (colțurile grilei de ziduri) plus 5 condiții de frontieră invalide sunt explicit denumite și testate.
+### 3.5 Rezistenta la false-positive — cel mai bun din toate suitele
 
-#### Puncte slabe
-- **a)** `step()` nu este apelat niciodată. Interfața RL primară — recompense, schimbul de tur, detectarea câștig/pierdere, regula de remiză, garda `RuntimeError` — este complet netestată.
-- **b)** Niciun test de salt al pionului de niciun fel.
-- **c)** `encode()`, `encode_state_canonical()` și funcțiile canonice policy/mask nu sunt niciodată exercitate.
-- **d)** `clone()` niciodată testat.
-- **e)** Regula remiză la 3 repetiții netestată.
-- **f)** `reset(walls_left=...)` netestat.
-- **g)** Scopul este limitat efectiv la subsistemul de plasare a zidurilor.
+Combinatia de:
+1. Sanity checks pe cazurile valide (verifica si ce e legal, nu doar ce e ilegal)
+2. Verificari de excludere a cauzelor alternative (overlap/crossing/buget)
+3. Testul de consistenta a mastii (`TestLegalMaskConsistency`) care aplica si reface fiecare actiune marcata legala
+
+face aceasta suita cea mai rezistenta la false-positive dintre toate trei.
+
+### 3.6 Rigoarea metodologica — structurata, fara etichete formale
+
+Nu exista etichete EP/BVA, dar analiza scenariilor arata selectie sistematica: pentru fiecare regula, se testeaza **cazul de baza** (actiune legala), **negarea** (actiune ilegala cu motiv specific) si **cazuri limita** (adiacenta directa, margine tabla). Aceasta nu este EP/BVA formala, dar este o abordare sistematica implicita.
+
+### 3.7 Claritate si documentatie — cea mai buna din suite
+
+Structura pe clase tematice (`TestWallRules`, `TestPawnMovement`, etc.) si docstring-urile pe fiecare clasa si metoda fac intentia imediata de inteles. Denumirile metodelor (`test_wall_that_traps_opponent_is_rejected`) descriu contractul testat, nu implementarea.
 
 ---
 
-## 4. Contribuții unice pe suită
+## 4. Analiza Testelor Umane
 
-**Doar GPT-5.4 găsește / documentează:**
-- Bug cunoscut: `clone()` nu copiază array-ul owner *(xfail)*
-- Bug cunoscut: `step()` nu invalidează `_walls_sig` *(xfail)*
-- Bug cunoscut: acțiunile în afara domeniului aruncă `IndexError` *(xfail)*
+### 4.1 test_functional_quoridor.py — rigoare metodologica maxima, asertiuni minimale
 
-**Doar Opus-4.7 testează:**
-- Regula remiză la 3 repetiții
-- `reset(walls_left=...)` inițializare personalizată
-- `legal_actions()` == 0 când terminat
-- Mutarea pionului din colț (exact 2 mutări)
-- „Nu poate călca pe adversar" în mod explicit
-- Salt pion la marginea tablei
-- „Saltul nu poate reveni la sine"
-- Recompensa de victorie J1 (+1.0)
-- `apply/undo` pe o mutare câștigătoare (restaurare `done`/`winner`/`player`)
-- Lanț aleator `apply/undo` (stres 10 pași)
-- `clone()` produce aceeași mască legală
-- Conținutul canalelor `encode_state()` (pion, normalizare `walls_left`, goal row)
-- Verificare matematică rotație 180° pentru `policy_to_canonical`
-- Test smoke aleatoriu (25 jocuri)
-- Consistența constantelor spațiului de acțiuni
+#### Puncte forte de calitate
 
-**Doar testele umane acoperă:**
-- Metodologia de frontieră EP/BVA cu documentație completă
-- RSP-model mutation killers (MTK-001, MTK-002)
-- Runner extern scor mutanți (M1–M4)
-- Teste parametrizate directe pentru `_blocked_with` / `_blocked_with_temp`
-- Regresia reutilizării și invalidării cache-ului de cale
+**Metodologia EP + BVA este aplicata corect si complet:**
+
+- `TestQuoridorOverlapsH` partitioneaza spatiul de intrare in exact 4 clase de echivalenta disjuncte si exhaustive (overlap direct, overlap stanga, overlap dreapta, fara overlap). Fiecare test acopera **exact o clasa**. Aceasta este EP de manual.
+
+- `TestQuoridorLegalHWall` combina BVA pe 3 dimensiuni independente (`wr`, `wc`, `walls_left`) cu EP pe stari (`overlap`, `crossing`, `trap`). Cele 12 teste acopera **toate frontierele relevante** si toate **partitiile de stare invalida**.
+
+**Fiecare test are o singura asertie** cu mesaj descriptiv:
+```python
+assert env._legal_h_wall(0, 0) is True, "BVA_1 Failed: Expected True at Top-Left board edge boundary"
+```
+Mesajul de eroare identifica imediat clasa de frontiera care a esuat.
+
+**Invalidarea manuala a cache-ului** (`env._walls_sig_dirty = True`) dupa injectare directa de ziduri demonstreaza intelegerea mecanismului intern.
+
+#### Probleme de calitate
+
+**Izolare excesiva la cost de completitudine:** Fiecare test are o singura asertie, dar **nu verifica cazuri contrare**. De exemplu, `test_bva_1_top_left_edge` verifica doar ca `_legal_h_wall(0, 0) is True` — nu verifica ca zidul chiar se poate plasa efectiv, ca `walls_left` scade, sau ca masca legala il include.
+
+**Acoperire limitata la doua metode:** Intreaga suita functionala testeaza exclusiv `_overlaps_h` si `_legal_h_wall`. Metodele `_legal_v_wall`, `_overlaps_v`, `_crosses_v` nu sunt atinse.
 
 ---
 
-## 5. Rezumat cantitativ
+### 4.2 test_mutation_killers.py — cea mai riguroasa componenta din toate suitele
 
-| Metric | GPT-5.4 | Opus-4.7 | Uman |
-|---|:---:|:---:|:---:|
-| Nr. aproximativ de teste | ~20 | ~45 | ~40+ |
-| Apeluri distincte de clase/metode exercitate | 11 | 18 | 10 |
-| Integrare `step()` testată | DA | DA | NU |
-| Conținut `encode()` verificat | Parțial | DA | NU |
-| Simetrie canonică testată | DA | DA | NU |
-| `clone()` testat | DA | DA | NU |
-| Mecanica saltului testată | DA | DA | NU |
-| Regula de remiză 3 repetări testată | NU | DA | NU |
-| `reset(walls_left)` testat | NU | DA | NU |
-| Adâncimea `apply/undo` | 3 acțiuni | 10 acțiuni | 2 acțiuni |
-| Adâncimea predicatelor de zid | MEDIE | ÎNALTĂ | ÎNALTĂ (BVA/EP) |
-| Teste directe `_blocked_with` | NU | NU | DA (12 cazuri) |
-| Testare de mutanți | NU | NU | DA (RSP + runner) |
-| Documentație bug-uri cunoscute | DA (3) | NU | NU |
-| Testare smoke / fuzz | NU | DA | NU |
-| Documentație cod / metodologie | SCĂZUTĂ | MEDIE | ÎNALTĂ |
+Aceasta componenta demonstreaza cel mai ridicat nivel de rigoare metodologica.
+
+**Modelul RSP (Reachability — State Infection — Propagation)** este aplicat corect:
+
+```
+MTK-001:
+- Reachability: se construieste o cusca cu 3 directii blocate, singura iesire = LEFT
+- State Infection: mutatia dezactiveaza ramura LEFT (if False)
+  => BFS nu mai exploreaza noduri la stanga
+- Propagation: _has_path_with_temp returneaza False in loc de True
+  => asertia finala pica pe mutant, trece pe original
+```
+
+**Precondition assertions** verifica ca setup-ul este corect inainte de asertia principala:
+```python
+assert env._blocked_with_temp(1, 1, 0, 1, ...) is True,  "UP trebuie blocat"
+assert env._blocked_with_temp(1, 1, 1, 2, ...) is True,  "RIGHT trebuie blocat"
+assert env._blocked_with_temp(1, 1, 2, 1, ...) is True,  "DOWN trebuie blocat"
+assert env._blocked_with_temp(1, 1, 1, 0, ...) is False, "LEFT trebuie liber"
+```
+Aceste precondition-uri garanteaza ca orice esec al testului principal este cauzat de mutant, nu de un setup incorect.
+
+**Documentatia** din docstring descrie exact: ID mutant, operatorul de mutatie, linia din sursa, modificarea exacta, efectul, de ce a supravietuit in suitele anterioare, si demonstratia formala a neechivalentei. Aceasta este **testare de mutanti de nivel industrial**.
 
 ---
 
-## 6. Verdict și clasament
+### 4.3 test_structural_manual.py — testare structurala manuala pentru `_has_path_with_temp`
 
-### Clasament: Opus-4.7 > Uman > GPT-5.4
+Suita contine 6 teste pytest care vizeaza metoda `_has_path_with_temp`, acoperind ramuri, conditii si scenarii de cale din algoritmul BFS intern. Fiecare test este scris manual si tinteste explicit o ramura sau combinatie de conditii distincta.
 
-#### Opus-4.7 — 8.5 / 10
-Cea mai puternică suită în ansamblu. Este singura care testează regula de remiză la 3 repetări, reset personalizat, `apply/undo` pe mutări câștigătoare, salt pion la margine și un test smoke aleatoriu. Amploarea sa structurală și lizibilitatea o fac cel mai bun fișier de teste independent. Principalul deficit este absența completă a testării de mutanți și a documentației bug-urilor cunoscute.
+#### Proiectarea testelor — izolare buna, scop bine definit
 
-#### Uman — 7.5 / 10
-Cea mai riguroasă suită din punct de vedere metodologic și singura care oferă testare de mutanți (atât un runner de scor cât și RSP-model killers). Cu toate acestea, este limitată aproape exclusiv la subsistemul de ziduri și nu exercită niciodată interfața RL (`step()`) sau stratul de simetrie/encodare — un punct orb critic pentru un mediu RL.
+Fiecare test acopera o ramura distincta sau o combinatie de conditii din `_has_path_with_temp`, documentata explicit in docstring:
 
-#### GPT-5.4 — 6.5 / 10
-Acoperă preocupările corecte de nivel înalt (`step()`, simetrie, salturi) și documentează unic trei bug-uri reale prin markeri `xfail`. Cu toate acestea, este cea mai mică suită, ratează victoria J1, regula de remiză și nu are teste pentru ziduri verticale. Utilă ca supliment, dar insuficientă singură.
+```python
+def test_start_is_target(env):
+    """Branch coverage: `if sr == target_row` evaluates to True. Guarantees early exit with True."""
+    assert env._has_path_with_temp(start=(8, 4), target_row=8) == True
+```
 
+Structura este coerenta: fiecare test are un singur scop, un singur setup si o singura asertie. Testele sunt organizate progresiv: de la cazul trivial (start == target) la scenarii complexe (BFS complet, conditii de vizitare, zid temporar).
 
+#### Calitatea asertiunilor — precise si cu semnificatie semantica
+
+Fiecare asertie verifica **valoarea semantica** a rezultatului (`True` sau `False`) in contextul scenariului construit, nu proprietati sintactice ale obiectului returnat.
+
+`test_full_exploration_and_return_false` blocheaza complet randul 3 cu ziduri reale (`env.walls_h[3, c] = 1` pentru toti `c`) si verifica ca BFS epuizeaza coada fara a gasi calea — un scenariu cu risc real de a esua pe un bug in logica de terminare.
+
+`test_temporary_wall_logic` verifica ambele cazuri (cu si fara zidul temporar) in acelasi test — o exceptie justificata de la izolarea stricta, deoarece cele doua asertii testeaza exact **contrastul** dintre absenta si prezenta argumentului `temp_h`, validand integrarea acestuia in `_blocked_with_temp`.
+
+#### Setup si rezistenta la false-positive — solide
+
+Fixture-ul `@pytest.fixture` garanteaza o instanta `QuoridorEnv` proaspata per test, eliminand dependentele de stare intre teste. Testele apeleaza direct `env._has_path_with_temp(...)` pe instanta reala a clasei — nu exista reimplementari locale si nu exista injectare de metode.
+
+#### Rigoarea metodologica — acoperire structurala declarata si trasabila
+
+Comentarul de inceput al fisierului declara explicit tipurile de acoperire urmarite:
+```
+# Contains Statement Coverage, Branch Coverage, Condition Coverage, Path Coverage
+```
+Docstring-ul fiecarui test mapeaza scenariul la ramura sau conditia acoperita (`if sr == target_row`, `if r > 0`, `while q:`, `not visited[ni]`, `if c > 0`, `if c < BOARD_SIZE - 1`), oferind trasabilitate directa intre test si graful de flux al metodei.
+
+#### Limitari
+
+- Suita acopera exclusiv `_has_path_with_temp`. Alte metode cu logica de graful similar (`_blocked_with_temp`, `_check_paths_with_temp_wall`) nu sunt acoperite.
+- Nu exista sanity checks pe cazuri contrare in interiorul testelor — fiecare test verifica un singur sens al ramurii.
+- `test_temporary_wall_logic` combina doua afirmatii intr-un singur test, reducand izolarea la nivel de esec.
+
+---
+
+## 5. Matricea calitate/rigoare
+
+| Dimensiune | GPT-5.4 | Opus-4.7 | Functional (uman) | Structural Manual (uman) | Mutation (uman) |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Izolare (un comportament per test) | Medie | **Inalta** | **Inalta** | **Inalta** | **Inalta** |
+| Determinism | **DA** | **DA** | **DA** | **DA** | **DA** |
+| Completitudinea asertiunilor | **Inalta** | **Inalta** | Medie (o singura asertie) | Buna | **Inalta** |
+| Sanity checks / cazuri contrare | Partial | **DA (sistematic)** | NU | NU | **DA** |
+| Precondition assertions | NU | Partial | NU | NU | **DA** |
+| Rezistenta la false-positive | Medie | **Inalta** | Medie | **Inalta** | **Inalta** |
+| Rigoarea metodologica | Ad-hoc inteligent | Sistematic implicit | **EP/BVA formal** | **Branch/Cond. declarata** | **RSP formal** |
+| Claritate denumiri | Buna | **Excelenta** | Buna | **Buna** | **Excelenta** |
+| Documentatie intent | Minima | **Buna** | **Buna** | **Buna** (docstrings) | **Excelenta** |
+| Robustete la refactorizare | Medie | **Buna** | **Buna** | **Buna** | **Buna** |
+| Detectia bug-urilor reale | **Inalta** (xfail, import) | Medie | Medie | Medie | **Inalta** |
+
+---
+
+## 6. Anti-patternuri identificate
+
+| Anti-pattern | Suita | Descriere |
+|---|---|---|
+| Test cu prea multe responsabilitati | GPT-5.4 | `test_reset_contract_and_initial_legal_actions` verifica 6+ proprietati independente |
+| Manipulare directa a turului | Opus-4.7 | `env.player = 0` dupa `apply()` pentru a forta perspectiva; acceptabil, dar fragil |
+| Izolare redusa in test de contrast | test_structural_manual.py | `test_temporary_wall_logic` combina doua afirmatii (cu/fara temp wall) intr-un singur test |
+
+---
+
+## 7. Verdict si clasament
+
+### Clasament pe calitate si rigoare: Mutation Killers > Opus-4.7 > Structural Manual > GPT-5.4 > Functional
+
+---
+
+### Opus-4.7 — 8.5 / 10
+
+Cea mai riguroasa suita in ansamblu. Respecta principiul single responsibility, adauga sanity checks sistematice si verificari de excludere a cauzelor alternative, garanteaza determinismul si are cea mai clara documentatie. Principalul deficit: absenta precondition assertions formale si a unei metodologii declarate.
+
+---
+
+### test_mutation_killers.py — 9.0 / 10 (per test individual)
+
+Cel mai ridicat nivel de rigoare per test individual din toate suitele. Modelul RSP aplicat corect, precondition assertions sistematice, documentatie de nivel industrial. Punctaj maxim per test, insa suita are doar 2 teste — nu poate sustine singura o strategie de testare.
+
+---
+
+### GPT-5.4 — 7.0 / 10
+
+Asertiunile sunt precise si complete (helper-ul `snapshot` include `walls_h_owner`/`walls_v_owner`). Descoperirea bug-urilor reale prin `xfail` si testul de import `shortest.py` demonstreaza gandire critica. Deficitul principal: densitate excesiva per test si absenta sanity checks pe cazurile valide.
+
+---
+
+### test_functional_quoridor.py — 6.5 / 10
+
+Metodologia EP/BVA este aplicata corect si documentata exemplar. Fiecare test are o singura asertie clara. Insa acoperirea limitata la doua metode si absenta verificarilor cazurilor contrare limiteaza valoarea practica.
+
+---
+
+### test_structural_manual.py — 7.5 / 10
+
+O imbunatatire substantiala fata de suita structurala generata automat. Teste curate, care apeleaza metoda reala, cu docstrings ce traseaza explicit fiecare ramura acoperita. Limitele principale: acoperire restransa la o singura metoda si absenta sanity checks. In contextul testarii structurale, aceasta este abordarea corecta.
+
+---
+
+*Nota: Evaluarea se bazeaza pe starea fisierelor la data de 2026-05-17 si se concentreaza exclusiv pe calitatea si rigoarea testelor, nu pe numarul de functionalitati acoperite. Include commit `a8b17bd` ("Revised Structural Tests", 16 mai 2026).*

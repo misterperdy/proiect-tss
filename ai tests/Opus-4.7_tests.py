@@ -1,614 +1,465 @@
 """
-Test suite for QuoridorEnv (Quoridor_Class.py + state_encoder.py + shortest.py).
+Teste pentru QuoridorEnv (mediul Quoridor pentru Reinforcement Learning).
 
-The suite focuses on:
-  1. Action-space encoding and legal-mask shape/values.
-  2. Pawn movement, including the jump rules (the most error-prone Quoridor sub-system).
-  3. Wall placement validation: overlap, cross, budget, path-existence rule.
-  4. Goal detection and termination semantics (win, illegal-loss, draw, post-done step).
-  5. Apply/undo reversibility -- critical for MCTS / AlphaZero search.
-  6. Clone independence.
-  7. State-encoder shape and the canonical-perspective rotation.
-  8. Policy <-> canonical permutation round-trip.
-  9. A randomized smoke test that drives many games to termination under the legal mask.
+Ținta acestor teste sunt invarianții critici și locurile cu cea mai mare
+probabilitate de a ascunde bug-uri:
 
-Run with:  pytest test_quoridor.py -v
+  - Aspectul spațiului de acțiuni
+  - Inversabilitatea apply / undo (critic pentru roll-out-uri MCTS)
+  - Reguli de plasare a zidurilor (overlap, cross, blocare totală, buget)
+  - Mișcările pionului (de bază, salt drept, salt diagonal, pătrat ocupat)
+  - Detecția obiectivului / câștigătorului / alternanța turelor
+  - Codificarea canonică a stării (rotația perspectivei pentru jucătorul 1)
+  - Invalidarea cache-ului semnăturii zidurilor
+
+Pot fi rulate cu:  python -m unittest test_quoridor_env.py
 """
+
+import unittest
 import numpy as np
-import pytest
 
 from Quoridor_Class import (
     QuoridorEnv,
-    BOARD_SIZE,
-    MAX_WALLS,
-    NUM_ACTIONS,
-    ACTION_H_BASE,
-    ACTION_V_BASE,
-    NUM_PAWN_ACTIONS,
-    NUM_H_WALLS,
-    NUM_V_WALLS,
+    BOARD_SIZE, MAX_WALLS, NUM_ACTIONS,
+    NUM_PAWN_ACTIONS, NUM_H_WALLS, NUM_V_WALLS,
+    ACTION_H_BASE, ACTION_V_BASE,
 )
 from state_encoder import (
-    encode_state,
     encode_state_canonical,
-    policy_to_canonical,
-    policy_from_canonical,
+    policy_to_canonical, policy_from_canonical,
     mask_to_canonical,
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# ----------------------------- helpers -----------------------------
 
-def pawn_action(r, c):
+def _pawn_action(r, c):
     return r * BOARD_SIZE + c
 
-
-def h_wall_action(wr, wc):
+def _h_action(wr, wc):
     return ACTION_H_BASE + wr * (BOARD_SIZE - 1) + wc
 
-
-def v_wall_action(wr, wc):
+def _v_action(wr, wc):
     return ACTION_V_BASE + wr * (BOARD_SIZE - 1) + wc
 
 
-def fresh_env():
-    return QuoridorEnv()
+def _snapshot(env):
+    """Captura completă a stării observabile (folosită pentru testul apply/undo)."""
+    return (
+        tuple(env.pawns),
+        env.walls_h.copy(),
+        env.walls_v.copy(),
+        env.walls_h_owner.copy(),
+        env.walls_v_owner.copy(),
+        tuple(env.walls_left),
+        env.player,
+        env.done,
+        env.winner,
+    )
 
 
-# ---------------------------------------------------------------------------
-# 1. Action-space encoding
-# ---------------------------------------------------------------------------
-
-class TestActionSpace:
-    """Catches off-by-one errors in the index layout used everywhere downstream."""
-
-    def test_constants_match_board_size(self):
-        wgs = BOARD_SIZE - 1  # wall-grid size
-        assert NUM_PAWN_ACTIONS == BOARD_SIZE * BOARD_SIZE
-        assert NUM_H_WALLS == wgs * wgs
-        assert NUM_V_WALLS == wgs * wgs
-        assert ACTION_H_BASE == NUM_PAWN_ACTIONS
-        assert ACTION_V_BASE == ACTION_H_BASE + NUM_H_WALLS
-        assert NUM_ACTIONS == ACTION_V_BASE + NUM_V_WALLS
-
-    def test_action_helpers_invertible(self):
-        # Pawn action endpoints
-        assert pawn_action(0, 0) == 0
-        assert pawn_action(BOARD_SIZE - 1, BOARD_SIZE - 1) == NUM_PAWN_ACTIONS - 1
-        # Wall action endpoints sit just inside their slabs
-        assert h_wall_action(0, 0) == ACTION_H_BASE
-        assert h_wall_action(BOARD_SIZE - 2, BOARD_SIZE - 2) == ACTION_V_BASE - 1
-        assert v_wall_action(0, 0) == ACTION_V_BASE
-        assert v_wall_action(BOARD_SIZE - 2, BOARD_SIZE - 2) == NUM_ACTIONS - 1
+def _states_equal(s1, s2):
+    return (
+        s1[0] == s2[0]
+        and np.array_equal(s1[1], s2[1])
+        and np.array_equal(s1[2], s2[2])
+        and np.array_equal(s1[3], s2[3])
+        and np.array_equal(s1[4], s2[4])
+        and s1[5] == s2[5]
+        and s1[6] == s2[6]
+        and s1[7] == s2[7]
+        and s1[8] == s2[8]
+    )
 
 
-# ---------------------------------------------------------------------------
-# 2. Reset / initial state
-# ---------------------------------------------------------------------------
+# ----------------------------- testele -----------------------------
 
-class TestReset:
-    def test_initial_pawn_positions(self):
-        env = fresh_env()
-        # Player 0 starts at the bottom row, Player 1 at the top, both centered.
-        assert env.pawns[0] == (BOARD_SIZE - 1, BOARD_SIZE // 2)
-        assert env.pawns[1] == (0, BOARD_SIZE // 2)
+class TestActionSpace(unittest.TestCase):
+    """Constantele spațiului de acțiuni trebuie să partiționeze corect indecșii."""
 
-    def test_initial_metadata(self):
-        env = fresh_env()
-        assert env.player == 0
-        assert env.done is False
-        assert env.winner is None
-        assert env.walls_left == [MAX_WALLS, MAX_WALLS]
-        assert env.walls_h.shape == (BOARD_SIZE - 1, BOARD_SIZE - 1)
-        assert env.walls_v.shape == (BOARD_SIZE - 1, BOARD_SIZE - 1)
-        assert env.walls_h.sum() == 0 and env.walls_v.sum() == 0
-        # Wall ownership grids should start empty (-1 = unowned).
-        assert (env.walls_h_owner == -1).all()
-        assert (env.walls_v_owner == -1).all()
+    def test_partition_dimensions(self):
+        self.assertEqual(NUM_PAWN_ACTIONS, BOARD_SIZE * BOARD_SIZE)
+        self.assertEqual(NUM_H_WALLS, (BOARD_SIZE - 1) ** 2)
+        self.assertEqual(NUM_V_WALLS, (BOARD_SIZE - 1) ** 2)
+        self.assertEqual(NUM_ACTIONS, NUM_PAWN_ACTIONS + NUM_H_WALLS + NUM_V_WALLS)
+        self.assertEqual(ACTION_H_BASE, NUM_PAWN_ACTIONS)
+        self.assertEqual(ACTION_V_BASE, NUM_PAWN_ACTIONS + NUM_H_WALLS)
 
-    def test_reset_with_custom_walls_left(self):
+
+class TestInitialState(unittest.TestCase):
+    """După reset(), starea trebuie să fie cea oficială de început."""
+
+    def setUp(self):
+        self.env = QuoridorEnv()
+
+    def test_pawn_positions(self):
+        self.assertEqual(self.env.pawns[0], (BOARD_SIZE - 1, BOARD_SIZE // 2))
+        self.assertEqual(self.env.pawns[1], (0, BOARD_SIZE // 2))
+
+    def test_walls_left_and_no_walls_placed(self):
+        self.assertEqual(self.env.walls_left, [MAX_WALLS, MAX_WALLS])
+        self.assertEqual(int(self.env.walls_h.sum()), 0)
+        self.assertEqual(int(self.env.walls_v.sum()), 0)
+        self.assertTrue((self.env.walls_h_owner == -1).all())
+        self.assertTrue((self.env.walls_v_owner == -1).all())
+
+    def test_turn_and_status(self):
+        self.assertEqual(self.env.player, 0)
+        self.assertFalse(self.env.done)
+        self.assertIsNone(self.env.winner)
+
+    def test_initial_legal_pawn_moves(self):
+        """Pionul 0 din (8,4) are exact 3 mutări legale: sus, stânga, dreapta."""
+        mask = self.env.legal_actions()
+        pawn_legal_count = int(mask[:NUM_PAWN_ACTIONS].sum())
+        self.assertEqual(pawn_legal_count, 3)
+        self.assertEqual(mask[_pawn_action(7, 4)], 1.0)   # sus
+        self.assertEqual(mask[_pawn_action(8, 3)], 1.0)   # stânga
+        self.assertEqual(mask[_pawn_action(8, 5)], 1.0)   # dreapta
+        self.assertEqual(mask[_pawn_action(8, 4)], 0.0)   # nu poate sta
+        self.assertEqual(mask[_pawn_action(0, 4)], 0.0)   # destinație ocupată
+
+    def test_reset_walls_left_override(self):
+        self.env.reset(walls_left=[3, 5])
+        self.assertEqual(self.env.walls_left, [3, 5])
+        self.assertEqual(self.env.pawns[0], (BOARD_SIZE - 1, BOARD_SIZE // 2))
+
+
+class TestApplyUndo(unittest.TestCase):
+    """apply -> undo trebuie să fie un invers perfect (critic pentru MCTS)."""
+
+    def test_pawn_move_roundtrip(self):
         env = QuoridorEnv()
-        env.reset(walls_left=[3, 5])
-        assert env.walls_left == [3, 5]
-        # Custom walls_left must not bleed back into MAX_WALLS or shared state.
-        env2 = QuoridorEnv()
-        assert env2.walls_left == [MAX_WALLS, MAX_WALLS]
+        pre = _snapshot(env)
+        env.undo(env.apply(_pawn_action(7, 4)))
+        self.assertTrue(_states_equal(pre, _snapshot(env)))
+
+    def test_h_wall_roundtrip(self):
+        env = QuoridorEnv()
+        pre = _snapshot(env)
+        env.undo(env.apply(_h_action(3, 4)))
+        self.assertTrue(_states_equal(pre, _snapshot(env)))
+
+    def test_v_wall_roundtrip(self):
+        env = QuoridorEnv()
+        pre = _snapshot(env)
+        env.undo(env.apply(_v_action(3, 4)))
+        self.assertTrue(_states_equal(pre, _snapshot(env)))
+
+    def test_long_random_sequence_full_unwind(self):
+        """Aplică 50 de acțiuni legale aleatoare, apoi le derulează invers."""
+        rng = np.random.default_rng(0)
+        env = QuoridorEnv()
+        initial = _snapshot(env)
+        tokens = []
+        for _ in range(50):
+            if env.done:
+                break
+            legal = np.where(env.legal_actions() > 0)[0]
+            if legal.size == 0:
+                break
+            tokens.append(env.apply(int(rng.choice(legal))))
+        for tok in reversed(tokens):
+            env.undo(tok)
+        self.assertTrue(_states_equal(initial, _snapshot(env)))
+
+    def test_winning_move_undo_restores_done_flag(self):
+        """Mutarea câștigătoare setează done/winner; undo trebuie să le anuleze."""
+        env = QuoridorEnv()
+        env.pawns[0] = (1, 4)  # un pas de obiectiv
+        tok = env.apply(_pawn_action(0, 4))
+        self.assertTrue(env.done)
+        self.assertEqual(env.winner, 0)
+        # Turul NU se schimbă după mutarea câștigătoare.
+        self.assertEqual(env.player, 0)
+        env.undo(tok)
+        self.assertFalse(env.done)
+        self.assertIsNone(env.winner)
+        self.assertEqual(env.player, 0)
+        self.assertEqual(env.pawns[0], (1, 4))
 
 
-# ---------------------------------------------------------------------------
-# 3. legal_actions() shape and values
-# ---------------------------------------------------------------------------
+class TestWallRules(unittest.TestCase):
+    """Reguli de plasare a zidurilor: overlap, cross, buget, blocare drum."""
 
-class TestLegalMask:
-    def test_mask_shape_and_dtype(self):
-        env = fresh_env()
+    def test_h_wall_overlap_is_rejected(self):
+        env = QuoridorEnv()
+        env.apply(_h_action(4, 4))
+        env.player = 0  # forțăm întoarcerea la jucătorul 0 pentru a-i testa masca
         mask = env.legal_actions()
-        assert mask.shape == (NUM_ACTIONS,)
-        assert mask.dtype == np.float32
+        # Zidurile orizontale adiacente împart o jumătate.
+        self.assertEqual(mask[_h_action(4, 3)], 0.0)
+        self.assertEqual(mask[_h_action(4, 5)], 0.0)
+        # Plasarea în aceeași celulă - evident interzisă.
+        self.assertEqual(mask[_h_action(4, 4)], 0.0)
+        # Distanță >= 2 pe același rând - OK.
+        self.assertEqual(mask[_h_action(4, 6)], 1.0)
+        # Pe alt rând - OK.
+        self.assertEqual(mask[_h_action(3, 4)], 1.0)
 
-    def test_mask_is_binary(self):
-        env = fresh_env()
+    def test_v_wall_overlap_is_rejected(self):
+        env = QuoridorEnv()
+        env.apply(_v_action(4, 4))
+        env.player = 0
         mask = env.legal_actions()
-        assert set(np.unique(mask).tolist()).issubset({0.0, 1.0})
+        self.assertEqual(mask[_v_action(3, 4)], 0.0)
+        self.assertEqual(mask[_v_action(5, 4)], 0.0)
+        self.assertEqual(mask[_v_action(4, 4)], 0.0)
+        # Pe aceeași coloană, dar la rând non-adiacent - OK.
+        self.assertEqual(mask[_v_action(6, 4)], 1.0)
 
-    def test_initial_legal_count(self):
-        # P0 at (8,4) has 3 pawn moves (up, left, right). Both wall slabs are fully
-        # legal at start (no overlaps/crosses, paths exist). Total = 3 + 64 + 64 = 131.
-        env = fresh_env()
-        assert int(env.legal_actions().sum()) == 3 + NUM_H_WALLS + NUM_V_WALLS
-
-    def test_mask_zero_after_done(self):
-        env = fresh_env()
-        env.done = True
+    def test_h_and_v_walls_cannot_cross(self):
+        env = QuoridorEnv()
+        env.apply(_h_action(4, 4))
+        env.player = 0
         mask = env.legal_actions()
-        assert mask.sum() == 0.0
+        # V-zid la aceeași intersecție (wr, wc) - se intersectează.
+        self.assertEqual(mask[_v_action(4, 4)], 0.0)
 
-
-# ---------------------------------------------------------------------------
-# 4. Pawn movement (basic + jump rules)
-# ---------------------------------------------------------------------------
-
-def _legal_pawn_targets(env):
-    """Pull legal pawn destinations as (r,c) pairs from the legal mask."""
-    mask = env.legal_actions()
-    return {(i // BOARD_SIZE, i % BOARD_SIZE) for i in range(NUM_PAWN_ACTIONS) if mask[i] == 1.0}
-
-
-class TestPawnMovement:
-    def test_corner_pawn_has_two_moves(self):
-        env = fresh_env()
-        env.pawns = [(BOARD_SIZE - 1, 0), (0, 0)]  # P0 at SW corner, P1 at NW corner
-        env.player = 0
-        targets = _legal_pawn_targets(env)
-        # From (8,0): up to (7,0) and right to (8,1) only.
-        assert targets == {(BOARD_SIZE - 2, 0), (BOARD_SIZE - 1, 1)}
-
-    def test_pawn_blocked_by_wall(self):
-        env = fresh_env()
-        # H wall (7, 3) blocks vertical moves (7,3)-(8,3) and (7,4)-(8,4).
-        env.walls_h[7, 3] = 1
-        # Default P0 at (8, 4) -- up is now blocked.
-        targets = _legal_pawn_targets(env)
-        assert (7, 4) not in targets
-        # Sideways and other directions remain.
-        assert (8, 3) in targets and (8, 5) in targets
-
-    def test_pawn_cannot_step_onto_opponent(self):
-        env = fresh_env()
-        env.pawns = [(5, 4), (4, 4)]  # adjacent
-        env.player = 0
-        targets = _legal_pawn_targets(env)
-        assert (4, 4) not in targets, "Stepping onto opponent's square must be illegal."
-
-
-class TestPawnJumpRules:
-    """The Quoridor jump rules are the single most error-prone sub-system."""
-
-    def test_simple_jump_over_opponent(self):
-        env = fresh_env()
-        env.pawns = [(5, 4), (4, 4)]
-        env.player = 0
-        targets = _legal_pawn_targets(env)
-        # No wall behind opponent => P0 jumps straight to (3, 4).
-        assert (3, 4) in targets
-        # Diagonals must NOT be available when a straight jump is possible.
-        assert (4, 3) not in targets
-        assert (4, 5) not in targets
-
-    def test_diagonal_jump_when_wall_blocks_straight(self):
-        env = fresh_env()
-        env.pawns = [(5, 4), (4, 4)]
-        env.player = 0
-        # H wall (3, 3) blocks (3,4)-(4,4): the straight jump destination.
-        env.walls_h[3, 3] = 1
-        targets = _legal_pawn_targets(env)
-        # Straight jump now blocked; sideways diagonals must be enabled.
-        assert (3, 4) not in targets
-        assert (4, 3) in targets
-        assert (4, 5) in targets
-
-    def test_diagonal_jump_when_opponent_at_edge(self):
-        env = fresh_env()
-        env.pawns = [(1, 4), (0, 4)]  # P1 on the top edge
-        env.player = 0
-        targets = _legal_pawn_targets(env)
-        # Straight jump would land on row -1 (off-board); diagonals must be allowed.
-        assert (0, 3) in targets and (0, 5) in targets
-
-    def test_jump_does_not_return_to_self(self):
-        env = fresh_env()
-        env.pawns = [(5, 4), (4, 4)]
-        env.player = 0
-        targets = _legal_pawn_targets(env)
-        # Even if some diagonal logic would land on (cr, cc), the env must filter it.
-        assert (5, 4) not in targets
-
-
-# ---------------------------------------------------------------------------
-# 5. Wall placement validation
-# ---------------------------------------------------------------------------
-
-class TestWallPlacement:
-    def test_overlap_horizontal_walls_rejected(self):
-        env = fresh_env()
-        env.walls_h[3, 3] = 1
-        # An H-wall sharing any cell with (3,3) overlaps: (3,2) and (3,4).
-        assert env._legal_h_wall(3, 3) is False, "Same slot must overlap."
-        assert env._legal_h_wall(3, 2) is False, "Adjacent slot overlaps cell (3,3)."
-        assert env._legal_h_wall(3, 4) is False, "Adjacent slot overlaps cell (3,4)."
-        # Two slots away is fine.
-        assert env._legal_h_wall(3, 5) is True
-        # Different row entirely: no overlap.
-        assert env._legal_h_wall(4, 3) is True
-
-    def test_overlap_vertical_walls_rejected(self):
-        env = fresh_env()
-        env.walls_v[3, 3] = 1
-        assert env._legal_v_wall(3, 3) is False
-        assert env._legal_v_wall(2, 3) is False
-        assert env._legal_v_wall(4, 3) is False
-        assert env._legal_v_wall(5, 3) is True
-        assert env._legal_v_wall(3, 4) is True
-
-    def test_perpendicular_walls_cannot_cross(self):
-        env = fresh_env()
-        env.walls_h[3, 3] = 1
-        # A V-wall at the same (3,3) intersection crosses the H-wall.
-        assert env._legal_v_wall(3, 3) is False
-        # Different intersections must remain legal.
-        assert env._legal_v_wall(3, 4) is True
-        assert env._legal_v_wall(4, 3) is True
-
-    def test_wall_budget_enforced(self):
-        env = fresh_env()
-        env.walls_left[0] = 0  # current player exhausted walls
+    def test_no_walls_when_budget_zero(self):
+        env = QuoridorEnv()
+        env.walls_left[0] = 0
         mask = env.legal_actions()
-        # No wall actions of either orientation may be legal.
-        assert mask[ACTION_H_BASE:].sum() == 0.0
-        # Pawn moves must still be available.
-        assert mask[:ACTION_H_BASE].sum() > 0
+        # Niciun zid legal.
+        self.assertEqual(int(mask[ACTION_H_BASE:].sum()), 0)
+        # Mutările pionului rămân disponibile.
+        self.assertGreater(int(mask[:NUM_PAWN_ACTIONS].sum()), 0)
 
-    def test_path_blocking_wall_is_illegal(self):
-        """The defining Quoridor rule: a wall that traps a player must be rejected."""
-        env = fresh_env()
-        # Trap-construction: P0 at (8,8). H wall (7,7) blocks (7,7)-(8,7) and (7,8)-(8,8).
-        # P0's only escape is then (8,7). A V wall at (7,6) blocks (8,6)-(8,7),
-        # which fully traps P0 in (8,8).
-        env.pawns = [(BOARD_SIZE - 1, BOARD_SIZE - 1), (0, 0)]
-        env.walls_h[BOARD_SIZE - 2, BOARD_SIZE - 2] = 1  # (7, 7)
-        assert env._legal_v_wall(BOARD_SIZE - 2, BOARD_SIZE - 3) is False, (
-            "Wall that completely traps a pawn must be illegal."
+    def test_wall_actually_blocks_pawn(self):
+        """Zid plasat -> mișcarea care îl traversează trebuie ilegală."""
+        env = QuoridorEnv()
+        # H-zid la (7,4) blochează (7,4)<->(8,4) și (7,5)<->(8,5).
+        env.apply(_h_action(7, 4))
+        # Jucătorul 1 mută orice e legal.
+        m1 = env.legal_actions()
+        env.apply(int(np.where(m1 > 0)[0][0]))
+        # Acum jucătorul 0 nu mai poate urca la (7,4).
+        mask = env.legal_actions()
+        self.assertEqual(mask[_pawn_action(7, 4)], 0.0)
+        # Dar mișcările laterale rămân legale.
+        self.assertEqual(mask[_pawn_action(8, 3)], 1.0)
+        self.assertEqual(mask[_pawn_action(8, 5)], 1.0)
+
+    def test_wall_that_traps_opponent_is_rejected(self):
+        """
+        Plasarea unui zid care lasă oricare jucător fără drum spre obiectiv
+        trebuie să fie ilegală - DAR doar din motivul de drum, nu overlap/cross.
+        """
+        env = QuoridorEnv()
+        # Construim un capcan-de-colț pentru pionul 1.
+        env.pawns[1] = (0, 0)
+        env.walls_v[0, 0] = 1                 # blochează (0,0)<->(0,1) și (1,0)<->(1,1)
+        env._walls_sig_dirty = True
+
+        # Pre-condiție: pionul 1 are încă drum spre rândul 8 prin (1,0)->(2,0)->...
+        self.assertTrue(env._has_path_with_temp(env.pawns[1], BOARD_SIZE - 1))
+
+        # H-zidul la (1,0) ar bloca (1,0)<->(2,0): pionul 1 ar fi prins în
+        # {(0,0),(1,0)} fără ieșire spre rândul 8.
+        mask = env.legal_actions()
+        self.assertEqual(
+            mask[_h_action(1, 0)], 0.0,
+            "Zidul care anulează drumul singular al adversarului trebuie să fie ilegal"
         )
-        # Sanity: a non-trapping V-wall in the same neighbourhood is still legal.
-        assert env._legal_v_wall(BOARD_SIZE - 2, BOARD_SIZE - 4) is True
+        # Sanity: respingerea NU vine din overlap/cross/buget.
+        self.assertFalse(env._overlaps_h(1, 0))
+        self.assertFalse(env._crosses_h(1, 0))
+        self.assertGreater(env.walls_left[0], 0)
 
-    def test_wall_out_of_bounds(self):
-        env = fresh_env()
-        wgs = BOARD_SIZE - 1
-        # Indices on or past the wall-grid edge must be rejected.
-        assert env._legal_h_wall(wgs, 0) is False
-        assert env._legal_h_wall(0, wgs) is False
-        assert env._legal_h_wall(-1, 0) is False
+    def test_wall_owner_is_recorded(self):
+        env = QuoridorEnv()
+        # Mutarea 1: jucătorul 0 pune un h-zid.
+        env.apply(_h_action(3, 3))
+        self.assertEqual(int(env.walls_h_owner[3, 3]), 0)
+        # Mutarea 2: jucătorul 1 pune un v-zid.
+        env.apply(_v_action(5, 5))
+        self.assertEqual(int(env.walls_v_owner[5, 5]), 1)
 
 
-# ---------------------------------------------------------------------------
-# 6. Goal detection / termination
-# ---------------------------------------------------------------------------
+class TestPawnMovement(unittest.TestCase):
+    """Mișcările pionului, inclusiv salturile peste adversar."""
 
-class TestTermination:
+    def test_cannot_move_to_opponent_square(self):
+        env = QuoridorEnv()
+        env.pawns[0] = (4, 4)
+        env.pawns[1] = (3, 4)  # direct deasupra
+        mask = env.legal_actions()
+        self.assertEqual(mask[_pawn_action(3, 4)], 0.0)
+
+    def test_straight_jump_over_opponent(self):
+        env = QuoridorEnv()
+        env.pawns[0] = (4, 4)
+        env.pawns[1] = (3, 4)
+        mask = env.legal_actions()
+        # (2,4) e ținta saltului drept.
+        self.assertEqual(mask[_pawn_action(2, 4)], 1.0)
+        # Când saltul drept e disponibil, diagonalele NU trebuie legale.
+        self.assertEqual(mask[_pawn_action(3, 3)], 0.0)
+        self.assertEqual(mask[_pawn_action(3, 5)], 0.0)
+
+    def test_diagonal_jump_when_blocked_behind_opponent(self):
+        env = QuoridorEnv()
+        env.pawns[0] = (4, 4)
+        env.pawns[1] = (3, 4)
+        # H-zid între (2,4) și (3,4) -> blochează saltul drept.
+        env.walls_h[2, 4] = 1
+        env._walls_sig_dirty = True
+        mask = env.legal_actions()
+        # Saltul drept e blocat.
+        self.assertEqual(mask[_pawn_action(2, 4)], 0.0)
+        # Salturile diagonale (3,3) și (3,5) devin legale.
+        self.assertEqual(mask[_pawn_action(3, 3)], 1.0)
+        self.assertEqual(mask[_pawn_action(3, 5)], 1.0)
+
+    def test_jump_fallback_at_board_edge(self):
+        """
+        Adversar lipit de marginea tablei -> saltul drept e OOB,
+        așa că diagonalele trebuie să fie legale.
+        """
+        env = QuoridorEnv()
+        env.pawns[0] = (1, 4)
+        env.pawns[1] = (0, 4)  # rândul 0, salt drept ar fi (-1,4) - OOB
+        mask = env.legal_actions()
+        self.assertEqual(mask[_pawn_action(0, 3)], 1.0)
+        self.assertEqual(mask[_pawn_action(0, 5)], 1.0)
+        self.assertEqual(mask[_pawn_action(0, 4)], 0.0)  # pătrat ocupat
+
+
+class TestGoalAndTurns(unittest.TestCase):
+    """Detecția victoriei și alternanța turelor."""
+
     def test_player0_wins_at_row_0(self):
-        env = fresh_env()
-        env.pawns = [(1, 4), (0, 0)]  # P0 one step from goal
-        env.player = 0
-        obs, reward, done, info = env.step(pawn_action(0, 4))
-        assert done is True
-        assert env.winner == 0
-        assert reward == 1.0
-        # When the game ends on a winning move, the player must NOT be flipped.
-        assert env.player == 0
+        env = QuoridorEnv()
+        env.pawns[0] = (1, 4)
+        env.apply(_pawn_action(0, 4))
+        self.assertTrue(env.done)
+        self.assertEqual(env.winner, 0)
+        # Turul NU se schimbă - câștigătorul rămâne mover-ul.
+        self.assertEqual(env.player, 0)
 
     def test_player1_wins_at_row_8(self):
-        env = fresh_env()
-        env.pawns = [(8, 0), (BOARD_SIZE - 2, 4)]  # P1 one step from goal
+        env = QuoridorEnv()
+        env.pawns[1] = (BOARD_SIZE - 2, 4)
         env.player = 1
-        obs, reward, done, info = env.step(pawn_action(BOARD_SIZE - 1, 4))
-        assert done is True
-        assert env.winner == 1
-        assert reward == 1.0
+        env.apply(_pawn_action(BOARD_SIZE - 1, 4))
+        self.assertTrue(env.done)
+        self.assertEqual(env.winner, 1)
+        self.assertEqual(env.player, 1)
 
-    def test_illegal_action_immediately_loses(self):
-        env = fresh_env()
-        # P0 at (8,4) can't move to (0,0) in one step -> illegal.
-        obs, reward, done, info = env.step(pawn_action(0, 0))
-        assert done is True
-        assert env.winner == 1, "Opponent must be declared winner on illegal move."
-        assert reward == -1.0
-        assert info.get("illegal") is True
+    def test_turn_alternation_on_normal_moves(self):
+        env = QuoridorEnv()
+        self.assertEqual(env.player, 0)
+        env.apply(_pawn_action(7, 4))
+        self.assertEqual(env.player, 1)
+        env.apply(_pawn_action(1, 4))
+        self.assertEqual(env.player, 0)
 
-    def test_step_after_done_raises(self):
-        env = fresh_env()
-        env.done = True
-        with pytest.raises(RuntimeError):
-            env.step(pawn_action(7, 4))
-
-    def test_threefold_repetition_draws(self):
-        """Shuffle the same two pawns back and forth; on the 3rd repeat, game is a draw."""
-        env = fresh_env()
-        # Move both pawns away from the centre column so they never collide.
-        env.pawns = [(8, 0), (0, 8)]
-        env.player = 0
-        moves = [
-            pawn_action(7, 0),  # P0
-            pawn_action(1, 8),  # P1
-            pawn_action(8, 0),  # P0 back
-            pawn_action(0, 8),  # P1 back  <-- 1st repeat of starting position (post-P1)
-            pawn_action(7, 0),
-            pawn_action(1, 8),
-            pawn_action(8, 0),
-            pawn_action(0, 8),  # 2nd repeat
-            pawn_action(7, 0),
-            pawn_action(1, 8),
-            pawn_action(8, 0),
-            pawn_action(0, 8),  # 3rd repeat -> draw
-        ]
-        last = None
-        for a in moves:
-            last = env.step(a)
-            if last[2]:
-                break
-        obs, reward, done, info = last
-        assert done is True
-        assert env.winner is None, "3-fold repetition must be a draw (winner=None)."
-        assert reward == 0.0
+    def test_no_legal_actions_when_done(self):
+        env = QuoridorEnv()
+        env.pawns[0] = (1, 4)
+        env.apply(_pawn_action(0, 4))
+        self.assertTrue(env.done)
+        self.assertEqual(int(env.legal_actions().sum()), 0)
 
 
-# ---------------------------------------------------------------------------
-# 7. apply / undo reversibility (critical for MCTS)
-# ---------------------------------------------------------------------------
+class TestStateEncoding(unittest.TestCase):
+    """Codificarea canonică a stării: invariantă la perspectivă."""
 
-class TestApplyUndo:
-    def _snapshot(self, env):
-        return (
-            list(env.pawns),
-            env.walls_h.copy(),
-            env.walls_v.copy(),
-            env.walls_h_owner.copy(),
-            env.walls_v_owner.copy(),
-            list(env.walls_left),
-            env.player,
-            env.done,
-            env.winner,
-        )
-
-    def _equal(self, a, b):
-        return (
-            a[0] == b[0]
-            and np.array_equal(a[1], b[1])
-            and np.array_equal(a[2], b[2])
-            and np.array_equal(a[3], b[3])
-            and np.array_equal(a[4], b[4])
-            and a[5] == b[5]
-            and a[6] == b[6]
-            and a[7] == b[7]
-            and a[8] == b[8]
-        )
-
-    def test_pawn_apply_undo(self):
-        env = fresh_env()
-        before = self._snapshot(env)
-        token = env.apply(pawn_action(7, 4))
-        assert env.pawns[0] == (7, 4)
-        env.undo(token)
-        assert self._equal(self._snapshot(env), before)
-
-    def test_h_wall_apply_undo(self):
-        env = fresh_env()
-        before = self._snapshot(env)
-        token = env.apply(h_wall_action(3, 3))
-        assert env.walls_h[3, 3] == 1
-        assert env.walls_h_owner[3, 3] == 0
-        assert env.walls_left[0] == MAX_WALLS - 1
-        env.undo(token)
-        assert self._equal(self._snapshot(env), before)
-
-    def test_v_wall_apply_undo(self):
-        env = fresh_env()
-        before = self._snapshot(env)
-        token = env.apply(v_wall_action(2, 5))
-        assert env.walls_v[2, 5] == 1
-        assert env.walls_v_owner[2, 5] == 0
-        env.undo(token)
-        assert self._equal(self._snapshot(env), before)
-
-    def test_winning_apply_undo_restores_done_and_player(self):
-        env = fresh_env()
-        env.pawns = [(1, 4), (0, 0)]  # P0 one step from goal
-        env.player = 0
-        before = self._snapshot(env)
-        token = env.apply(pawn_action(0, 4))
-        # The win must update state.
-        assert env.done is True and env.winner == 0
-        # And undo must roll all of it back including done/winner/player.
-        env.undo(token)
-        assert self._equal(self._snapshot(env), before)
-
-    def test_apply_undo_chain_of_random_legal_actions(self):
-        """Stress the apply/undo invariants with a deeper stack."""
-        rng = np.random.default_rng(0)
-        env = fresh_env()
-        before = self._snapshot(env)
-        tokens = []
-        for _ in range(10):
-            mask = env.legal_actions()
-            if mask.sum() == 0 or env.done:
-                break
-            choice = int(rng.choice(np.flatnonzero(mask)))
-            tokens.append(env.apply(choice))
-            if env.done:
-                break
-        # Unwind in reverse and check we're back to the start.
-        for t in reversed(tokens):
-            env.undo(t)
-        assert self._equal(self._snapshot(env), before)
-
-
-# ---------------------------------------------------------------------------
-# 8. Clone independence
-# ---------------------------------------------------------------------------
-
-class TestClone:
-    def test_clone_is_independent(self):
-        env = fresh_env()
-        env.step(pawn_action(7, 4))  # P0 moves up
-        clone = env.clone()
-        assert clone.pawns == env.pawns
-        assert np.array_equal(clone.walls_h, env.walls_h)
-        # Mutate the clone -- the original must not change.
-        clone.walls_h[0, 0] = 1
-        clone.pawns[0] = (0, 0)
-        clone.walls_left[0] = 0
-        assert env.walls_h[0, 0] == 0
-        assert env.pawns[0] == (7, 4)
-        assert env.walls_left[0] == MAX_WALLS
-
-    def test_clone_starts_from_same_legal_mask(self):
-        env = fresh_env()
-        env.step(h_wall_action(3, 3))
-        clone = env.clone()
-        assert np.array_equal(clone.legal_actions(), env.legal_actions())
-
-
-# ---------------------------------------------------------------------------
-# 9. State encoder
-# ---------------------------------------------------------------------------
-
-class TestEncoder:
-    def test_encode_shape_and_dtype(self):
-        env = fresh_env()
-        x = env.encode()
-        assert x.shape == (7, BOARD_SIZE, BOARD_SIZE)
-        assert x.dtype == np.float32
-
-    def test_my_pawn_and_opp_pawn_planes(self):
-        env = fresh_env()
-        x = encode_state(env)  # absolute (non-canonical) view
-        cr, cc = env.pawns[0]
-        orr, occ = env.pawns[1]
-        # Channel 0 = current player pawn, Channel 1 = opponent pawn.
-        assert x[0, cr, cc] == 1.0 and x[0].sum() == 1.0
-        assert x[1, orr, occ] == 1.0 and x[1].sum() == 1.0
-
-    def test_walls_left_planes_are_normalized(self):
-        env = fresh_env()
-        env.walls_left = [3, 7]
-        env.player = 0
-        x = encode_state(env)
-        # Channel 4 is current-player walls / MAX_WALLS, channel 5 is opponent's.
-        assert np.allclose(x[4], 3 / MAX_WALLS)
-        assert np.allclose(x[5], 7 / MAX_WALLS)
-
-    def test_canonical_is_identity_for_player_0(self):
-        env = fresh_env()
-        env.step(pawn_action(7, 4))  # now player flips to 1
-        env.player = 0  # force perspective back to P0 for this test
-        assert np.allclose(encode_state(env), encode_state_canonical(env))
-
-    def test_canonical_is_180_rotation_for_player_1(self):
-        env = fresh_env()
+    def test_initial_state_canonical_symmetry(self):
+        """În poziția simetrică inițială, ambele perspective canonice coincid."""
+        env = QuoridorEnv()
+        enc_p0 = encode_state_canonical(env)
         env.player = 1
-        x_abs = encode_state(env)
-        x_can = encode_state_canonical(env)
-        # 180-degree rotation along (H, W) axes for every plane.
-        assert np.allclose(x_can, np.rot90(x_abs, 2, axes=(1, 2)))
+        enc_p1 = encode_state_canonical(env)
+        np.testing.assert_array_equal(enc_p0, enc_p1)
 
-    def test_canonical_goal_row_is_top_for_current_player(self):
-        """Channel 6 marks the current player's goal row. In canonical view that row is 0."""
-        env = fresh_env()
+    def test_canonical_pawn_planes_orientation(self):
+        """Jucătorul curent e mereu la rândul 8 (jos), adversarul la rândul 0."""
+        env = QuoridorEnv()
+
+        enc = encode_state_canonical(env)  # jucătorul 0
+        self.assertEqual(enc[0, BOARD_SIZE - 1, BOARD_SIZE // 2], 1.0)
+        self.assertEqual(float(enc[0].sum()), 1.0)
+        self.assertEqual(enc[1, 0, BOARD_SIZE // 2], 1.0)
+        self.assertEqual(float(enc[1].sum()), 1.0)
+
         env.player = 1
-        x_can = encode_state_canonical(env)
-        # In canonical view P1's goal (originally row 8) becomes row 0.
-        assert x_can[6, 0, :].sum() == BOARD_SIZE
-        assert x_can[6, 1:, :].sum() == 0
+        enc = encode_state_canonical(env)
+        # După rotația 180°, pionul 1 (de la (0,4)) apare la (8,4).
+        self.assertEqual(enc[0, BOARD_SIZE - 1, BOARD_SIZE // 2], 1.0)
+        self.assertEqual(enc[1, 0, BOARD_SIZE // 2], 1.0)
 
+    def test_encoding_has_expected_shape(self):
+        env = QuoridorEnv()
+        enc = encode_state_canonical(env)
+        self.assertEqual(enc.shape, (7, BOARD_SIZE, BOARD_SIZE))
 
-class TestPolicyPermutation:
-    def test_round_trip_player_0_is_identity(self):
-        rng = np.random.default_rng(1)
+    def test_policy_roundtrip_under_canonicalization(self):
+        rng = np.random.default_rng(7)
         pi = rng.random(NUM_ACTIONS).astype(np.float32)
-        back = policy_from_canonical(policy_to_canonical(pi, 0), 0)
-        assert np.array_equal(pi, back)
+        for player in (0, 1):
+            pi_can = policy_to_canonical(pi, player)
+            pi_back = policy_from_canonical(pi_can, player)
+            np.testing.assert_allclose(pi_back, pi)
 
-    def test_round_trip_player_1_is_identity(self):
-        rng = np.random.default_rng(2)
-        pi = rng.random(NUM_ACTIONS).astype(np.float32)
-        back = policy_from_canonical(policy_to_canonical(pi, 1), 1)
-        assert np.allclose(pi, back)
-
-    def test_pawn_action_permutation_is_180_rot(self):
-        """For P1 the canonical action for cell (r,c) must be cell (8-r, 8-c)."""
-        pi = np.zeros(NUM_ACTIONS, dtype=np.float32)
-        pi[pawn_action(2, 3)] = 1.0  # mark a single pawn cell in env coords
-        pi_can = policy_to_canonical(pi, 1)
-        rotated_idx = pawn_action(BOARD_SIZE - 1 - 2, BOARD_SIZE - 1 - 3)
-        assert pi_can[rotated_idx] == 1.0
-        # The original index should now be empty.
-        assert pi_can[pawn_action(2, 3)] == 0.0
-
-    def test_mask_to_canonical_preserves_total(self):
-        env = fresh_env()
-        env.player = 1
+    def test_mask_canonical_preserves_legal_count(self):
+        env = QuoridorEnv()
         mask = env.legal_actions()
-        mask_can = mask_to_canonical(mask, env.player)
-        assert mask_can.sum() == mask.sum()
+        for player in (0, 1):
+            mask_can = mask_to_canonical(mask, player)
+            self.assertEqual(mask.sum(), mask_can.sum())
 
 
-# ---------------------------------------------------------------------------
-# 10. Smoke test: random self-play under the legal mask
-# ---------------------------------------------------------------------------
+class TestWallsSignatureCache(unittest.TestCase):
+    """Semnătura zidurilor (folosită pentru cache-ul drumurilor)
+    trebuie să fie sensibilă DOAR la modificările de ziduri."""
 
-class TestRandomPlaySmoke:
-    def test_random_games_terminate_cleanly(self):
-        rng = np.random.default_rng(42)
-        n_games = 25
-        max_steps = 400
-        terminations = {"win0": 0, "win1": 0, "draw": 0, "illegal": 0, "stalled": 0}
+    def test_sig_changes_after_wall_placement(self):
+        env = QuoridorEnv()
+        sig0 = env._get_walls_sig()
+        env.apply(_h_action(3, 3))
+        sig1 = env._get_walls_sig()
+        self.assertNotEqual(sig0, sig1)
 
-        for _ in range(n_games):
-            env = fresh_env()
-            for _ in range(max_steps):
-                if env.done:
-                    break
-                mask = env.legal_actions()
-                legal_idx = np.flatnonzero(mask)
-                if len(legal_idx) == 0:
-                    terminations["stalled"] += 1
-                    break
-                # Bias the random policy slightly towards forward pawn moves so games
-                # actually finish; otherwise pure random play often runs the wall budget
-                # out without progress.
-                fwd = env.forward_pawn_actions()
-                if fwd and rng.random() < 0.6:
-                    a = int(rng.choice(fwd))
-                else:
-                    a = int(rng.choice(legal_idx))
-                env.step(a)
+    def test_sig_restored_after_undo(self):
+        env = QuoridorEnv()
+        sig0 = env._get_walls_sig()
+        tok = env.apply(_h_action(3, 3))
+        env.undo(tok)
+        sig1 = env._get_walls_sig()
+        self.assertEqual(sig0, sig1)
 
+    def test_sig_unchanged_after_pawn_move(self):
+        env = QuoridorEnv()
+        sig0 = env._get_walls_sig()
+        env.apply(_pawn_action(7, 4))
+        sig1 = env._get_walls_sig()
+        self.assertEqual(sig0, sig1)
+
+
+class TestLegalMaskConsistency(unittest.TestCase):
+    """Orice acțiune marcată legală trebuie să fie aplicabilă & reversibilă."""
+
+    def test_random_legal_actions_apply_and_undo_cleanly(self):
+        rng = np.random.default_rng(1)
+        env = QuoridorEnv()
+        for _ in range(15):
             if env.done:
-                if env.winner == 0:
-                    terminations["win0"] += 1
-                elif env.winner == 1:
-                    terminations["win1"] += 1
-                else:
-                    terminations["draw"] += 1
-
-        # Every game must have terminated cleanly under the (possibly truncated) rollout.
-        assert sum(terminations.values()) == n_games
-        # And we expect at least *some* genuine wins to occur with the forward bias.
-        assert terminations["win0"] + terminations["win1"] > 0
+                break
+            mask = env.legal_actions()
+            legal = np.where(mask > 0)[0]
+            self.assertGreater(legal.size, 0)
+            # Spot-check: din cele legale, câteva trebuie să meargă apply/undo.
+            for a in rng.choice(legal, size=min(5, legal.size), replace=False):
+                pre = _snapshot(env)
+                tok = env.apply(int(a))
+                env.undo(tok)
+                self.assertTrue(
+                    _states_equal(pre, _snapshot(env)),
+                    f"apply/undo nu a restabilit starea pentru acțiunea {int(a)}"
+                )
+            env.apply(int(rng.choice(legal)))
 
 
 if __name__ == "__main__":
-    import sys
-    sys.exit(pytest.main([__file__, "-v"]))
+    unittest.main()

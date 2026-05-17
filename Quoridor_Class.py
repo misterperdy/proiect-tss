@@ -19,17 +19,6 @@ class QuoridorEnv:
     def __init__(self):
         self.reset()
 
-    def clone(self):
-        e = QuoridorEnv()
-        e.pawns = list(self.pawns)
-        e.walls_h = self.walls_h.copy()
-        e.walls_v = self.walls_v.copy()
-        e.walls_left = list(self.walls_left)
-        e.player = self.player
-        e.done = self.done
-        e.winner = self.winner
-        return e
-
     def reset(self, walls_left=None):
         self.pawns = [(BOARD_SIZE - 1, BOARD_SIZE // 2), (0, BOARD_SIZE // 2)]
         wall_grid_size = BOARD_SIZE - 1
@@ -44,7 +33,6 @@ class QuoridorEnv:
         self._walls_sig_dirty = True
         self.walls_h_owner = np.full((wall_grid_size, wall_grid_size), -1, dtype=np.int8)
         self.walls_v_owner = np.full((wall_grid_size, wall_grid_size), -1, dtype=np.int8)
-        self._position_history = {}
         return self.encode()
 
     def _get_walls_sig(self):
@@ -63,53 +51,6 @@ class QuoridorEnv:
         except ImportError:
             from state_encoder import encode_state_canonical
         return encode_state_canonical(self)
-
-    def observe(self):
-        return {
-            "pawns": self.pawns,
-            "walls_h": self.walls_h,
-            "walls_v": self.walls_v,
-            "walls_left": self.walls_left,
-            "player": self.player
-        }
-
-    
-
-    def _position_key(self):
-        wh, wv = self._get_walls_sig()
-        return (tuple(self.pawns[0]), tuple(self.pawns[1]),
-                wh, wv,
-                tuple(self.walls_left), self.player)
-
-    def step(self, action):
-        if self.done:
-            raise RuntimeError("Game already finished.")
-        if not self.is_legal(action):
-            self.done = True
-            self.winner = self.player ^ 1
-            return self.encode(), -1.0, True, {"illegal": True}
-
-        self._apply_action_effects(action)
-        last = self.player
-        if self._reached_goal(last):
-            self.done = True
-            self.winner = last
-        if not self.done:
-            self.player ^= 1
-        
-        if not self.done:
-            pos_key = self._position_key()
-            self._position_history[pos_key] = self._position_history.get(pos_key, 0) + 1
-            if self._position_history[pos_key] >= 3:
-                self.done = True
-                self.winner = None
-
-        obs = self.encode()
-        reward = 0.0
-        if self.done:
-            if self.winner is not None:
-                reward = 1.0 if self.winner == last else -1.0
-        return obs, reward, self.done, {}
 
     def apply(self, action):
         token = {"player": self.player, "done": self.done, "winner": self.winner,
@@ -194,41 +135,6 @@ class QuoridorEnv:
 
     def is_legal(self, action):
         return self.legal_actions()[action] == 1.0
-
-    def forward_pawn_actions(self):
-        cr, cc = self.pawns[self.player]
-        opp = self.pawns[self.player ^ 1]
-        targets = self._pawn_legal_targets(cr, cc, opp)
-        fwd_ids = []
-        if self.player == 0:
-            for tr, tc in targets:
-                if tr < cr:
-                    fwd_ids.append(tr * BOARD_SIZE + tc)
-        else:
-            for tr, tc in targets:
-                if tr > cr:
-                    fwd_ids.append(tr * BOARD_SIZE + tc)
-        return fwd_ids
-
-    def _apply_action_effects(self, action):
-        if action < ACTION_H_BASE:
-            tr, tc = divmod(action, BOARD_SIZE)
-            self.pawns[self.player] = (tr, tc)
-            return
-        if action < ACTION_V_BASE:
-            idx = action - ACTION_H_BASE
-            wall_grid_size = BOARD_SIZE - 1
-            wr, wc = divmod(idx, wall_grid_size)
-            self.walls_h[wr, wc] = 1
-            self.walls_h_owner[wr, wc] = self.player
-            self.walls_left[self.player] -= 1
-            return
-        idx = action - ACTION_V_BASE
-        wall_grid_size = BOARD_SIZE - 1
-        wr, wc = divmod(idx, wall_grid_size)
-        self.walls_v[wr, wc] = 1
-        self.walls_v_owner[wr, wc] = self.player
-        self.walls_left[self.player] -= 1
 
     def _pawn_legal_targets(self, cr, cc, opp):
         orr, occ = opp
@@ -440,24 +346,6 @@ class QuoridorEnv:
                     visited[ni] = 1
                     q.append(ni)
 
-        return False
-
-    def _has_path_with(self, start, target_row, h_walls, v_walls):
-        try:
-            from .shortest import _pawn_legal_targets_from_pos
-        except ImportError:
-            from shortest import _pawn_legal_targets_from_pos
-        player_idx = 0 if target_row == 0 else 1
-        q = deque([start])
-        seen = {start}
-        while q:
-            r, c = q.popleft()
-            if r == target_row:
-                return True
-            for nr, nc in _pawn_legal_targets_from_pos(self, player_idx, r, c, h_walls, v_walls):
-                if (nr, nc) not in seen:
-                    seen.add((nr, nc))
-                    q.append((nr, nc))
         return False
 
     def _neighbors_with(self, r, c, h_walls, v_walls):
