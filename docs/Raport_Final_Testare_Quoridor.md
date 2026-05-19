@@ -168,7 +168,7 @@ Automatizarea procesului este realizată prin scriptul `run_mut_test.py`, care f
 2. **Execuție (`cosmic-ray exec`):** Fiecare mutant generat este injectat temporar, urmat de rularea suitei `pytest`.
 3. **Evaluare și Raportare (`cr-rate` & `cr-html`):** Este calculat *Mutation Score-ul* și se generează `report.html`.
 
-###3.3 Rezultate și Validarea Modelului RSP
+### 3.3 Rezultate și Validarea Modelului RSP
 La rularea pe proiectul nostru, Cosmic Ray a generat peste 2400 de mutanți (schimbări de operatori, modificări de cifre, alterări de bucle). Rezultatul a fost cel mai bun posibil: am obținut un Mutation Score de 100% chiar de la prima rulare, având 0 mutanți supraviețuitori.
 Acest scor demonstrează că testele noastre funcționale respectă în mod nativ principiile modelului RSP (Reachability, State Infection, Propagation): bug-ul a fost executat (Reachability), a modificat starea corectă a jocului (State Infection) și această eroare s-a transmis mai departe până la aserțiunile finale ale testelor (Propagation).
 
