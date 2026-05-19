@@ -24,3 +24,5 @@ Szocs Luca (341)
 # Demo video
 
 [Demo](https://youtu.be/LC2fqSk5mDE)
+[MutantiInceput](https://youtu.be/xRiPVlZ3ITw)
+[MutantiFinal](https://youtu.be/hnJ_IQkYzvw)
