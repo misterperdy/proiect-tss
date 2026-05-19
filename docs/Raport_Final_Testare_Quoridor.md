@@ -178,7 +178,6 @@ Mutații pe Pathfinding (Algoritmul BFS): Cosmic Ray a încercat să dezactiveze
 
 Relaxarea limitelor tablei: Când instrumentul a schimbat un operator din < în <=, mutantul ar fi permis algoritmului să caute vecini în afara matricei 9x9 (pe o linie ilegală 9). Testele noastre de graniță au detectat imediat comportamentul și au picat testul mutantului.
 
-![Diagrama Flux](diagrame_mutanti/Mutation_testing_workflow.png)
 ![Diagrama MTK00](diagrame_mutanti/MTK00.png)
 ![Diagrama MTK01](diagrame_mutanti/MTK01.png)
 
